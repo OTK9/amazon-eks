@@ -3,7 +3,7 @@ kind: ClusterConfig
 
 metadata:
   name: eks-spot-cluster
-  region: us-west-2
+  region: us-east-1
 
 vpc:
   id: "vpc-0872ded5f6ef1ae82"
@@ -22,7 +22,7 @@ managedNodeGroups:
     maxSize: 4
     ssh: 
       allow: true
-      publicKeyName: devops.pem
+      publicKeyName: devops
     tags:
       Name: ng-db
   - name: ng-spot
@@ -33,6 +33,6 @@ managedNodeGroups:
     spot: true
     ssh: 
       allow: true
-      publicKeyName: devops.pem
+      publicKeyName: devops
     tags:
       Name: ng-spot
