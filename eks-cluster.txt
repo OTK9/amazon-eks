@@ -143,7 +143,7 @@ aws iam create-policy \
 CLUSTER=eks-spot-cluster
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 eksctl create iamserviceaccount \
-    --cluster=$PRIMARY_CLUSTER \
+    --cluster=$CLUSTER \
     --name=velero-server \
     --namespace=velero \
     --role-name=eks-velero-backup \
@@ -151,7 +151,7 @@ eksctl create iamserviceaccount \
     --attach-policy-arn=arn:aws:iam::$ACCOUNT:policy/VeleroAccessPolicy \
     --approve
 	
-# Install Velero in both EKS Clusters
+# Install Velero in EKS Clusters
 helm repo add vmware-tanzu https://vmware-tanzu.github.io/helm-charts
 cat > values.yaml <<EOF
 configuration:
