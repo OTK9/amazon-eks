@@ -48,3 +48,37 @@ aws eks update-kubeconfig --region us-east-1 --name eks-spot-cluster
 
 # installing metric server
 kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# VELERO Backup:
+
+# Prerequisites
+# eksctl v0.155.0 or greater
+# cluster must be configured with an EKS IAM OIDC Provider. This is a requirement for IAM roles for service account.
+# Each cluster must have the Amazon EBS CSI driver installed.
+# AWS CLI version 2
+# Helm v3
+# kubectl
+
+# Create an IAM OIDC provider for your cluster
+# Determine the OIDC issuer ID for your cluster.
+cluster_name=eks-spot-cluster
+oidc_id=$(aws eks describe-cluster --name $cluster_name --query "cluster.identity.oidc.issuer" --output text | cut -d '/' -f 5)
+echo $oidc_id
+# Determine whether an IAM OIDC provider with your cluster's issuer ID is already in your account. If output is returned, then you already have an IAM OIDC provider for your cluster and you can skip the step after this. If no output is returned, then you must create an IAM OIDC provider for your cluster.
+aws iam list-open-id-connect-providers | grep $oidc_id | cut -d "/" -f4
+# Create an IAM OIDC identity provider for your cluster with the following command.
+eksctl utils associate-iam-oidc-provider --cluster $cluster_name --approve
+
+# Creating the Amazon EBS CSI driver IAM role
+# To create your Amazon EBS CSI plugin IAM role with eksctl
+eksctl create iamserviceaccount \
+    --name ebs-csi-controller-sa \
+    --namespace kube-system \
+    --cluster eks-spot-cluster \
+    --role-name AmazonEKS_EBS_CSI_DriverRole \
+    --role-only \
+    --attach-policy-arn arn:aws-us-go:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
+    --approve
+
+# Adding the Amazon EBS CSI driver add-on to your cluster
+eksctl create addon --name aws-ebs-csi-driver --cluster eks-spot-cluster --service-account-role-arn arn:aws:iam::891377401443:role/AmazonEKS_EBS_CSI_DriverRole --force
