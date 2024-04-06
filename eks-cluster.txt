@@ -65,7 +65,7 @@ kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/late
 # Create an IAM OIDC provider for your cluster
 # Determine the OIDC issuer ID for your cluster.
 cluster_name=eks-spot-cluster
-region = us-east-1
+region=us-east-1
 oidc_id=$(aws eks describe-cluster --name $cluster_name --query "cluster.identity.oidc.issuer" --output text | cut -d '/' -f 5)
 echo $oidc_id
 # Determine whether an IAM OIDC provider with your cluster's issuer ID is already in your account. If output is returned, then you already have an IAM OIDC provider for your cluster and you can skip the step after this. If no output is returned, then you must create an IAM OIDC provider for your cluster.
@@ -85,6 +85,123 @@ eksctl create iamserviceaccount \
     --approve
 
 # Adding the Amazon EBS CSI driver add-on to your cluster
-eksctl create addon --name aws-ebs-csi-driver --cluster eks-spot-cluster --service-account-role-arn arn:aws:iam::891377401443:role/AmazonEKS_EBS_CSI_DriverRole --force
+eksctl create addon --name aws-ebs-csi-driver --cluster eks-spot-cluster --service-account-role-arn arn:aws:iam::XXXXXXXXXXXX:role/AmazonEKS_EBS_CSI_DriverRole --force
 
 Install Velero
+# create an S3 bucket to store the backups
+
+BUCKET=devops001-eks-velero-backups
+REGION=us-east-1
+aws s3 mb s3://$BUCKET --region $REGION
+
+cat > velero_policy.json <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeVolumes",
+                "ec2:DescribeSnapshots",
+                "ec2:CreateTags",
+                "ec2:CreateVolume",
+                "ec2:CreateSnapshot",
+                "ec2:DeleteSnapshot"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:DeleteObject",
+                "s3:PutObject",
+                "s3:AbortMultipartUpload",
+                "s3:ListMultipartUploadParts"
+            ],
+            "Resource": [
+                "arn:aws:s3:::${BUCKET}/*"
+            ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::${BUCKET}"
+            ]
+        }
+    ]
+}
+EOF
+
+aws iam create-policy \
+    --policy-name VeleroAccessPolicy \
+    --policy-document file://velero_policy.json
+	
+CLUSTER=eks-spot-cluster
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+eksctl create iamserviceaccount \
+    --cluster=$PRIMARY_CLUSTER \
+    --name=velero-server \
+    --namespace=velero \
+    --role-name=eks-velero-backup \
+    --role-only \
+    --attach-policy-arn=arn:aws:iam::$ACCOUNT:policy/VeleroAccessPolicy \
+    --approve
+	
+# Install Velero in both EKS Clusters
+helm repo add vmware-tanzu https://vmware-tanzu.github.io/helm-charts
+cat > values.yaml <<EOF
+configuration:
+  backupStorageLocation:
+  - bucket: $BUCKET
+    provider: aws
+  volumeSnapshotLocation:
+  - config:
+      region: $REGION
+    provider: aws
+initContainers:
+- name: velero-plugin-for-aws
+  image: velero/velero-plugin-for-aws:v1.7.1
+  volumeMounts:
+  - mountPath: /target
+    name: plugins
+credentials:
+  useSecret: false
+serviceAccount:
+  server:
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::${ACCOUNT}:role/eks-velero-backup"
+EOF
+
+cat > values_recovery.yaml <<EOF
+configuration:
+  backupStorageLocation:
+  - bucket: $BUCKET
+    provider: aws
+  volumeSnapshotLocation:
+  - config:
+      region: $REGION
+    provider: aws
+initContainers:
+- name: velero-plugin-for-aws
+  image: velero/velero-plugin-for-aws:v1.7.1
+  volumeMounts:
+  - mountPath: /target
+    name: plugins
+credentials:
+  useSecret: false
+serviceAccount:
+  server:
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::${ACCOUNT}:role/eks-velero-recovery"
+EOF
+
+helm install velero vmware-tanzu/velero --version 5.0.2 \
+    --create-namespace \
+    --namespace velero \
+    -f values.yaml
+	
+kubectl get pods -n velero
